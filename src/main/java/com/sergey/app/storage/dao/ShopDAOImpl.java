@@ -1,5 +1,7 @@
 package com.sergey.app.storage.dao;
 
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.util.JSONParseException;
 import com.sergey.app.storage.Storage;
 import org.bson.BsonDocument;
@@ -8,8 +10,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+
+import static com.mongodb.client.model.Accumulators.*;
 
 
 @Component
@@ -48,76 +53,18 @@ public class ShopDAOImpl implements ShopDAO {
 
     @Override
     public void getStatistics() {
-        printNumberOfGoods();
-        printAveragePrice();
-        printMostExpensiveAndCheapestProduct();
-        printNumberOfGoodsCheapestOneHundred();
-    }
-
-    private void printNumberOfGoods() {
-        Iterator<Document> shops = storage.getShopMongoCollection().find().iterator();
-        while (shops.hasNext()) {
-            Document shop = shops.next();
-            List<Document> goods = new ArrayList<>((List<Document>) shop.get("listOfGoods"));
-            System.out.println(shop.get("name") + " number of goods: " + goods.size());
-        }
-        System.out.println("\n");
-    }
-
-    private void printAveragePrice() {
-        Iterator<Document> shops = storage.getShopMongoCollection().find().iterator();
-        while (shops.hasNext()) {
-            Document shop = shops.next();
-            List<Document> goods = new ArrayList<>((List<Document>) shop.get("listOfGoods"));
-            int averagePrice = 0;
-            for (Document product : goods) {
-                averagePrice += product.getInteger("price");
-            }
-            System.out.println(shop.get("name") + " average price: " + averagePrice / goods.size());
-        }
-        System.out.println("\n");
-    }
-
-    private void printMostExpensiveAndCheapestProduct() {
-        Iterator<Document> shops = storage.getShopMongoCollection().find().iterator();
-        while (shops.hasNext()) {
-            Document shop = shops.next();
-            List<Document> goods = new ArrayList<>((List<Document>) shop.get("listOfGoods"));
-            if (goods.size() != 0) {
-                String expensiveProduct = goods.get(0).getString("name");
-                String cheapestProduct = goods.get(0).getString("name");
-                int highPrice = goods.get(0).getInteger("price");
-                int lowPrice = goods.get(0).getInteger("price");
-                for (Document product : goods) {
-                    if (product.getInteger("price") > highPrice) {
-                        highPrice = product.getInteger("price");
-                        expensiveProduct = product.getString("name");
-                    }
-                    if (product.getInteger("price") < lowPrice) {
-                        lowPrice = product.getInteger("price");
-                        cheapestProduct = product.getString("name");
-                    }
-                }
-                System.out.println(shop.get("name") + " cheapest product: " + cheapestProduct + ". Most expensive product: " + expensiveProduct);
-            }
-        }
-        System.out.println("\n");
-    }
-
-    private void printNumberOfGoodsCheapestOneHundred() {
-        Iterator<Document> shops = storage.getShopMongoCollection().find().iterator();
-        while (shops.hasNext()) {
-            Document shop = shops.next();
-            List<Document> goods = new ArrayList<>((List<Document>) shop.get("listOfGoods"));
-            int counter = 0;
-            for (Document product : goods) {
-                if (product.getInteger("price") < 100) {
-                    counter ++;
-                }
-            }
-            System.out.println(shop.get("name") + " number of goods cheapest one hundred is: " + counter);
-        }
-        System.out.println("\n");
+        List<Document> statisticsList = storage.getShopMongoCollection().aggregate((Arrays.asList(
+                Aggregates.lookup("products", "products", "name", "product_list"),
+                Aggregates.unwind("$listOfGoods"),
+                Aggregates.sort(Sorts.descending("listOfGoods.price")),
+                Aggregates.group("$name",
+                        sum("productCount", 1),
+                        avg("avgPrice", "$listOfGoods.price"),
+                        first("theMostExpensiveProduct", "$listOfGoods.name"),
+                        last("theCheapestProduct", "$listOfGoods.name"),
+                        sum("lessThen100Count", BsonDocument.parse("{$cond: [ { $lt: [ \"$listOfGoods.price\", 100 ] }, 1, 0 ]}"))
+                )))).into(new ArrayList<>());
+        statisticsList.forEach(System.out::println);
     }
 
 
